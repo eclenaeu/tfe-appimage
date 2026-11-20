@@ -57,7 +57,10 @@ if [ -z "$TFE_DATA_HOME" ]; then
   export TFE_DATA_HOME
 fi
 mkdir -p "$TFE_DATA_HOME"
-exec "$HERE/usr/bin/theforceengine" "$@"
+# O motor procura UI_Text, Fonts, Shaders... a partir da pasta atual, então
+# entramos em usr/bin (onde ficam os atalhos para os dados) antes de iniciar.
+cd "$HERE/usr/bin"
+exec ./theforceengine "$@"
 EOF
 chmod +x AppRun.custom
 
