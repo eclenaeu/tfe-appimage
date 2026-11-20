@@ -1,0 +1,45 @@
+# Salvar como .github/workflows/appimage.yml no seu repositório
+# (junto com build-appimage.sh na raiz do repositório)
+name: AppImage
+
+on:
+  workflow_dispatch:
+    inputs:
+      tfe_ref:
+        description: "Branch ou tag do TheForceEngine a compilar"
+        default: "master"
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: debian:12   # glibc 2.36: base do AppImage
+    env:
+      TFE_REF: ${{ inputs.tfe_ref || 'master' }}
+    steps:
+      - name: Pré-requisitos do checkout
+        run: apt-get update && apt-get install -y --no-install-recommends git ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Gerar AppImage
+        run: bash build-appimage.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TheForceEngine-AppImage
+          path: |
+            TheForceEngine-*.AppImage
+            TheForceEngine-*.AppImage.zsync
+
+      - name: Publicar release (apenas em tags)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            TheForceEngine-*.AppImage
+            TheForceEngine-*.AppImage.zsync
