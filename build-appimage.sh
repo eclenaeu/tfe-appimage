@@ -34,14 +34,34 @@ DESTDIR="$WORK/AppDir" cmake --install build
 echo "==> Conteúdo instalado em AppDir:"
 find AppDir -maxdepth 4 | sort | head -60
 
-# --- Pontos a verificar depois do primeiro build -----------------------------
-# 1) Onde o motor procura seus dados (Shaders, fontes, UI...). Se ele não os
-#    achar dentro do AppImage, uma opção é deixar os dados ao lado do executável:
-#      ln -sfn ../share/TheForceEngine AppDir/usr/bin/TheForceEngine
-#    (o nome/estrutura exata depende do código; teste antes de fixar).
-# 2) O .desktop e o ícone abaixo vêm da instalação do próprio projeto.
-# -----------------------------------------------------------------------------
+# O motor procura seus dados (UI_Text, Fonts, Shaders, Mods...) ao lado do
+# executável. Como o AppImage monta tudo num diretório temporário, os caminhos
+# de sistema (/usr/share...) não existem em tempo de execução. Por isso criamos
+# atalhos relativos em usr/bin apontando para os dados em usr/share.
+echo "==> Ligando os dados do motor ao lado do executável"
+for item in AppDir/usr/share/TheForceEngine/*; do
+  name="$(basename "$item")"
+  ln -sfn "../share/TheForceEngine/$name" "AppDir/usr/bin/$name"
+done
+ls -la AppDir/usr/bin
 
+# AppRun próprio: define onde ficam os dados do usuário (configurações, saves,
+# log) antes de iniciar o motor. O padrão é ~/.config/TheForceEngine, mas quem
+# já tiver TFE_DATA_HOME definido continua mandando no próprio caminho.
+echo "==> Criando AppRun próprio"
+cat > AppRun.custom <<'EOF'
+#!/bin/sh
+HERE="$(dirname "$(readlink -f "$0")")"
+if [ -z "$TFE_DATA_HOME" ]; then
+  TFE_DATA_HOME="${XDG_CONFIG_HOME:-$HOME/.config}/TheForceEngine"
+  export TFE_DATA_HOME
+fi
+mkdir -p "$TFE_DATA_HOME"
+exec "$HERE/usr/bin/theforceengine" "$@"
+EOF
+chmod +x AppRun.custom
+
+# O .desktop e o ícone abaixo vêm da instalação do próprio projeto.
 DESKTOP="$(find AppDir -name '*.desktop' | head -n1 || true)"
 ICON="$(find AppDir -path '*icons*' \( -name '*.png' -o -name '*.svg' \) | head -n1 || true)"
 if [ -z "$DESKTOP" ] || [ -z "$ICON" ]; then
@@ -72,6 +92,7 @@ echo "==> Empacotando"
   --executable AppDir/usr/bin/theforceengine \
   --desktop-file "$DESKTOP" \
   --icon-file "$ICON" \
+  --custom-apprun AppRun.custom \
   --output appimage
 
 echo "==> Pronto:"
