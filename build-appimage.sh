@@ -52,15 +52,31 @@ echo "==> Criando AppRun próprio"
 cat > AppRun.custom <<'EOF'
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
+SRC="$HERE/usr/share/TheForceEngine"
+
 if [ -z "$TFE_DATA_HOME" ]; then
   TFE_DATA_HOME="${XDG_CONFIG_HOME:-$HOME/.config}/TheForceEngine"
   export TFE_DATA_HOME
 fi
 mkdir -p "$TFE_DATA_HOME"
-# O motor procura UI_Text, Fonts, Shaders... a partir da pasta atual, então
-# entramos em usr/bin (onde ficam os atalhos para os dados) antes de iniciar.
-cd "$HERE/usr/bin"
-exec ./theforceengine "$@"
+
+# O AppImage é só um iniciador: todas as pastas do motor (Mods, Fonts, Shaders,
+# UI_Text, Documentation...) ficam como pastas normais em TFE_DATA_HOME, onde
+# podem ser editadas, gerenciadas e ampliadas, como numa instalação no Windows.
+# Na primeira execução elas são copiadas do pacote; nas seguintes só entram os
+# itens que ainda não existem, sem sobrescrever nada seu.
+# Para trazer de volta os arquivos originais do pacote (por exemplo, depois de
+# atualizar o AppImage), execute com TFE_REFRESH_DATA=1: os arquivos existentes
+# são substituídos e as versões antigas ficam guardadas como arquivo~1~, etc.
+if [ -n "$TFE_REFRESH_DATA" ]; then
+  cp -a --no-preserve=mode --backup=numbered "$SRC/." "$TFE_DATA_HOME/"
+else
+  cp -an --no-preserve=mode "$SRC/." "$TFE_DATA_HOME/"
+fi
+
+# O motor procura UI_Text, Fonts, Shaders, Mods... a partir da pasta atual.
+cd "$TFE_DATA_HOME"
+exec "$HERE/usr/bin/theforceengine" "$@"
 EOF
 chmod +x AppRun.custom
 
