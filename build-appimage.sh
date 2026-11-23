@@ -34,10 +34,9 @@ DESTDIR="$WORK/AppDir" cmake --install build
 echo "==> Conteúdo instalado em AppDir:"
 find AppDir -maxdepth 4 | sort | head -60
 
-# O motor procura seus dados (UI_Text, Fonts, Shaders, Mods...) ao lado do
-# executável. Como o AppImage monta tudo num diretório temporário, os caminhos
-# de sistema (/usr/share...) não existem em tempo de execução. Por isso criamos
-# atalhos relativos em usr/bin apontando para os dados em usr/share.
+# Atalhos relativos em usr/bin apontando para os dados em usr/share. O AppRun
+# não depende deles (ele copia os dados para a pasta do programa), mas eles
+# permitem rodar o executável direto de usr/bin, útil para testes e diagnóstico.
 echo "==> Ligando os dados do motor ao lado do executável"
 for item in AppDir/usr/share/TheForceEngine/*; do
   name="$(basename "$item")"
@@ -45,37 +44,47 @@ for item in AppDir/usr/share/TheForceEngine/*; do
 done
 ls -la AppDir/usr/bin
 
-# AppRun próprio: define onde ficam os dados do usuário (configurações, saves,
-# log) antes de iniciar o motor. O padrão é ~/.config/TheForceEngine, mas quem
-# já tiver TFE_DATA_HOME definido continua mandando no próprio caminho.
+# AppRun próprio. O AppImage é só um iniciador, e há duas pastas separadas:
+#  - Dados do usuário (configurações, saves, capturas, log):
+#    ~/.config/TheForceEngine, definido pela variável TFE_DATA_HOME do motor.
+#    Quem já tiver TFE_DATA_HOME definido continua mandando no próprio caminho.
+#  - Pasta do programa (Mods, Fonts, Shaders, UI_Text, Documentation...):
+#    ~/.local/share/TheForceEngine, como pastas normais e editáveis.
 echo "==> Criando AppRun próprio"
 cat > AppRun.custom <<'EOF'
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
 SRC="$HERE/usr/share/TheForceEngine"
 
+# Dados do usuário
 if [ -z "$TFE_DATA_HOME" ]; then
   TFE_DATA_HOME="${XDG_CONFIG_HOME:-$HOME/.config}/TheForceEngine"
   export TFE_DATA_HOME
 fi
 mkdir -p "$TFE_DATA_HOME"
 
-# O AppImage é só um iniciador: todas as pastas do motor (Mods, Fonts, Shaders,
-# UI_Text, Documentation...) ficam como pastas normais em TFE_DATA_HOME, onde
-# podem ser editadas, gerenciadas e ampliadas, como numa instalação no Windows.
-# Na primeira execução elas são copiadas do pacote; nas seguintes só entram os
-# itens que ainda não existem, sem sobrescrever nada seu.
+# Pasta do programa. Quem quiser outro lugar define TFE_PROGRAM_DIR.
+PROGRAM_DIR="${TFE_PROGRAM_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/TheForceEngine}"
+mkdir -p "$PROGRAM_DIR"
+
+# Na primeira execução as pastas do motor são copiadas do pacote; nas seguintes
+# só entram os itens que ainda não existem, sem sobrescrever nada seu.
 # Para trazer de volta os arquivos originais do pacote (por exemplo, depois de
 # atualizar o AppImage), execute com TFE_REFRESH_DATA=1: os arquivos existentes
 # são substituídos e as versões antigas ficam guardadas como arquivo~1~, etc.
 if [ -n "$TFE_REFRESH_DATA" ]; then
-  cp -a --no-preserve=mode --backup=numbered "$SRC/." "$TFE_DATA_HOME/"
+  cp -a --no-preserve=mode --backup=numbered "$SRC/." "$PROGRAM_DIR/"
 else
-  cp -an --no-preserve=mode "$SRC/." "$TFE_DATA_HOME/"
+  cp -an --no-preserve=mode "$SRC/." "$PROGRAM_DIR/"
 fi
 
+# A pasta Captions deve existir só junto das pastas do motor: se sobrou uma
+# vazia entre os dados do usuário, ela é removida (rmdir não apaga pasta com
+# conteúdo).
+rmdir "$TFE_DATA_HOME/Captions" 2>/dev/null || true
+
 # O motor procura UI_Text, Fonts, Shaders, Mods... a partir da pasta atual.
-cd "$TFE_DATA_HOME"
+cd "$PROGRAM_DIR"
 exec "$HERE/usr/bin/theforceengine" "$@"
 EOF
 chmod +x AppRun.custom
@@ -90,6 +99,11 @@ if [ -z "$DESKTOP" ] || [ -z "$ICON" ]; then
 fi
 echo "Usando desktop: $DESKTOP"
 echo "Usando ícone:   $ICON"
+
+# Nome do aplicativo sem espaços (TheForceEngine), como no nome do arquivo.
+# Só a linha "Name=" é alterada; as traduções (Name[xx]=) não são tocadas.
+sed -i 's/^Name=.*/Name=TheForceEngine/' "$DESKTOP"
+grep -n '^Name' "$DESKTOP" || true
 
 echo "==> Baixando linuxdeploy"
 wget -q -nc https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
