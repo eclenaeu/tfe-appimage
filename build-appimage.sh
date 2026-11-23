@@ -4,7 +4,15 @@
 # a partir da pasta onde o AppImage final deve ficar.
 #
 # Variáveis opcionais:
-#   TFE_REF  branch ou tag do TheForceEngine a compilar (padrão: master)
+#   TFE_REF             branch ou tag do TheForceEngine a compilar (padrão: master,
+#                       que é a versão de desenvolvimento; para uma versão
+#                       estável use uma tag, por exemplo v1.22.420)
+#   TFE_SOURCE_TARBALL  caminho de um .tar.gz com o código-fonte a compilar, em
+#                       vez de baixar do GitHub (tem prioridade sobre TFE_REF)
+#   TFE_VERSION         texto da versão usado no nome do AppImage (padrão com
+#                       TFE_SOURCE_TARBALL: tirado do nome da pasta do arquivo)
+#   TFE_EDITOR          OFF (padrão) ou ON: compila o editor do TFE, que ainda
+#                       está em fase alfa e fica desligado, como no projeto
 set -euo pipefail
 
 TFE_REF="${TFE_REF:-master}"
@@ -20,14 +28,39 @@ apt-get install -y --no-install-recommends \
   libtheora-dev libogg-dev libvorbis-dev libglew-dev
 # Se o cmake reclamar de alguma biblioteca, adicione o pacote -dev acima.
 
-echo "==> Baixando o código ($TFE_REF)"
 rm -rf src build AppDir
-git clone --depth 1 --branch "$TFE_REF" \
-  https://github.com/TheForceEngine/TheForceEngine.git src
-VERSION="$(date +%Y%m%d)-$(git -C src rev-parse --short HEAD)"
+if [ -n "${TFE_SOURCE_TARBALL:-}" ]; then
+  # Build "fixado" a partir de um código-fonte local (.tar.gz).
+  echo "==> Usando o código-fonte local: $TFE_SOURCE_TARBALL"
+  mkdir src
+  tar -xf "$TFE_SOURCE_TARBALL" -C src --strip-components=1
+  top="$(tar -tf "$TFE_SOURCE_TARBALL" | sed -n '1p')"
+  top="${top%%/*}"
+  VERSION="${TFE_VERSION:-${top#TheForceEngine-}}"
+  # Sem .git dentro de src, o git poderia subir e achar o repositório deste
+  # projeto, e o motor mostraria a versão errada. Este limite impede isso, e o
+  # motor usa o gitVersion.h que já vem no código-fonte.
+  export GIT_CEILING_DIRECTORIES="$WORK"
+  PINNED=1
+else
+  echo "==> Baixando o código ($TFE_REF)"
+  git clone --depth 1 --branch "$TFE_REF" \
+    https://github.com/TheForceEngine/TheForceEngine.git src
+  case "$TFE_REF" in
+    v[0-9]*)
+      # Tag de versão: o AppImage fica fixado nela (sem atualização embutida).
+      VERSION="${TFE_REF#v}"
+      PINNED=1
+      ;;
+    *)
+      VERSION="$(date +%Y%m%d)-$(git -C src rev-parse --short HEAD)"
+      ;;
+  esac
+fi
 
 echo "==> Compilando"
-cmake -S src -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+cmake -S src -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
+  -DENABLE_EDITOR="${TFE_EDITOR:-OFF}"
 cmake --build build -j"$(nproc)"
 DESTDIR="$WORK/AppDir" cmake --install build
 
@@ -114,8 +147,10 @@ export APPIMAGE_EXTRACT_AND_RUN=1   # container não tem FUSE
 export PATH="$WORK:$PATH"           # o linuxdeploy acha o plugin por aqui
 export LDAI_OUTPUT="TheForceEngine-${VERSION}-x86_64.AppImage"
 
-# Atualização embutida (zsync) quando rodando no GitHub Actions
-if [ -n "${GITHUB_REPOSITORY:-}" ]; then
+# Atualização embutida (zsync) quando rodando no GitHub Actions. Builds fixados
+# em uma versão (código-fonte local) não recebem isso, para não serem
+# "atualizados" para outra versão sem querer.
+if [ -n "${GITHUB_REPOSITORY:-}" ] && [ -z "${PINNED:-}" ]; then
   export LDAI_UPDATE_INFORMATION="gh-releases-zsync|${GITHUB_REPOSITORY%%/*}|${GITHUB_REPOSITORY##*/}|latest|TheForceEngine-*x86_64.AppImage.zsync"
 fi
 
